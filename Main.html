@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ผู้ช่วยวางแผนก่อนบิน</title>
+<style>
+  body{font-family:sans-serif;max-width:480px;margin:16px auto;padding:0 12px}
+  label{display:block;margin-top:12px;font-weight:bold}
+  select,input{width:100%;box-sizing:border-box;padding:10px;margin-top:4px;font-size:16px}
+  button{margin-top:16px;padding:12px 18px;font-size:16px}
+  #out{margin-top:16px;padding:14px;border-radius:8px}
+  .green{background:#c8f7c5}.yellow{background:#fff3b0}.red{background:#ffc9c9}.err{background:#eee;color:#b00020}
+  small{color:#555}
+</style>
+</head>
+<body>
+<h2>ผู้ช่วยวางแผนก่อนบิน</h2>
+
+<label>รันเวย์ที่ใช้</label>
+<select id="rwy"></select>
+
+<label>ทิศลมที่พัดมาจาก (°, 0–360)</label>
+<input id="dir" type="number" inputmode="numeric" min="0" max="360" value="240">
+
+<label>ความเร็วลม (kt)</label>
+<input id="spd" type="number" inputmode="numeric" min="0" max="99" value="8">
+
+<label>ลมกระโชก (kt) เว้นว่างได้</label>
+<input id="gust" type="number" inputmode="numeric" min="0" max="99" placeholder="ไม่มี">
+
+<label>ทัศนวิสัย</label>
+<select id="vis">
+  <option value="9999">10 กม. ขึ้นไป</option>
+  <option value="8000">8 กม.</option>
+  <option value="6000">6 กม.</option>
+  <option value="5000">5 กม.</option>
+  <option value="4000">4 กม.</option>
+  <option value="3000">3 กม.</option>
+  <option value="1500">1.5 กม.</option>
+  <option value="800">800 ม.</option>
+</select>
+
+<label>ฐานเมฆต่ำสุด (ชั้น BKN/OVC)</label>
+<select id="ceil">
+  <option value="">ไม่มี (ท้องฟ้าโปร่ง/FEW/SCT)</option>
+  <option value="500">500 ฟุต</option>
+  <option value="800">800 ฟุต</option>
+  <option value="1000">1,000 ฟุต</option>
+  <option value="1500">1,500 ฟุต</option>
+  <option value="2000">2,000 ฟุต</option>
+  <option value="3000">3,000 ฟุต</option>
+  <option value="5000">5,000 ฟุต</option>
+</select>
+
+<button id="go">วิเคราะห์</button>
+<div id="out"></div>
+<p><small>เพื่อการศึกษาเท่านั้น ไม่ใช่เครื่องมือตัดสินใจบินจริง เกณฑ์สีเป็นค่าตัวอย่างที่ตั้งเอง</small></p>
+
+<script>
+// เกณฑ์ตัวอย่าง (ปรับได้)
+const LIMITS = { xwYellow:10, xwRed:15, twYellow:5, twRed:10,
+                 visYellow:8000, visRed:5000, ceilYellow:3000, ceilRed:1000 };
+
+const $ = id => document.getElementById(id);
+
+// สร้างรายการรันเวย์ 01–36 (ทิศ = เลขรันเวย์ x 10)
+for (let n = 1; n <= 36; n++) {
+  const o = document.createElement("option");
+  o.value = n * 10;
+  o.textContent = "รันเวย์ " + String(n).padStart(2, "0") + " (" + String(n * 10).padStart(3, "0") + "°)";
+  if (n === 36) o.selected = true;
+  $("rwy").appendChild(o);
+}
+
+$("go").onclick = () => {
+  const out = $("out");
+  const rwy = +$("rwy").value;
+  const dirRaw = $("dir").value, spdRaw = $("spd").value, gustRaw = $("gust").value;
+
+  if (dirRaw === "" || spdRaw === "" || +dirRaw < 0 || +dirRaw > 360 || +spdRaw < 0) {
+    out.className = "err";
+    out.textContent = "กรอกทิศลม (0–360) และความเร็วลมให้ถูกต้อง";
+    return;
+  }
+  const dir = +dirRaw, spd = +spdRaw;
+  const gust = gustRaw === "" ? null : +gustRaw;
+  if (gust !== null && gust < spd) {
+    out.className = "err";
+    out.textContent = "ลมกระโชกต้องไม่น้อยกว่าความเร็วลม";
+    return;
+  }
+
+  const w = gust !== null ? gust : spd;               // ใช้ค่ากระโชกถ้ามี
+  const a = (dir - rwy) * Math.PI / 180;
+  const head = Math.round(w * Math.cos(a) * 10) / 10; // บวก = ลมปะทะหัว, ลบ = ลมตาม
+  const crossSigned = w * Math.sin(a);                // บวก = จากขวา, ลบ = จากซ้าย
+  const cross = Math.round(Math.abs(crossSigned) * 10) / 10;
+  const tail = head < 0 ? -head : 0;
+  const vis = +$("vis").value;
+  const ceil = $("ceil").value === "" ? null : +$("ceil").value;
+
+  let level = 0; const notes = [];
+  const flag = (lv, text) => { level = Math.max(level, lv); notes.push((lv === 2 ? "✖ " : "⚠ ") + text); };
+
+  if (cross > LIMITS.xwRed) flag(2, "ลมขวางแรง " + cross.toFixed(1) + " kt");
+  else if (cross > LIMITS.xwYellow) flag(1, "ลมขวาง " + cross.toFixed(1) + " kt");
+  if (tail > LIMITS.twRed) flag(2, "ลมตามแรง " + tail.toFixed(1) + " kt");
+  else if (tail > LIMITS.twYellow) flag(1, "ลมตาม " + tail.toFixed(1) + " kt");
+  if (vis < LIMITS.visRed) flag(2, "ทัศนวิสัยต่ำ " + vis + " ม.");
+  else if (vis < LIMITS.visYellow) flag(1, "ทัศนวิสัย " + vis + " ม.");
+  if (ceil !== null && ceil < LIMITS.ceilRed) flag(2, "ฐานเมฆต่ำ " + ceil + " ฟุต");
+  else if (ceil !== null && ceil < LIMITS.ceilYellow) flag(1, "ฐานเมฆ " + ceil + " ฟุต");
+
+  const side = cross < 0.5 ? "" : (crossSigned > 0 ? " (จากขวา)" : " (จากซ้าย)");
+  out.className = ["green", "yellow", "red"][level];
+  out.innerHTML = "<b>" + ["บินได้", "ควรระวัง", "ไม่ควรบิน"][level] + "</b><br><small>" +
+    "ลม " + dir + "°/" + spd + (gust !== null ? "G" + gust : "") + " kt" +
+    (gust !== null ? " (คำนวณจากลมกระโชก)" : "") + "<br>" +
+    (head >= 0 ? "ลมปะทะหัว " : "ลมตาม ") + Math.abs(head).toFixed(1) + " kt | " +
+    "ลมขวาง " + cross.toFixed(1) + " kt" + side +
+    (notes.length ? "<br>" + notes.join("<br>") : "") + "</small>";
+};
+</script>
+</body>
+</html>
